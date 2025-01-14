@@ -65,7 +65,7 @@ if 'selected_product_details' not in st.session_state:
 # Streamlit App
 def main():
     st.set_page_config(page_title="Inventory Order Management", layout="wide")
-    st.title("📦 Inventory Order Management")
+    st.title("📦 Inventory Order Management App")
 
     st.sidebar.header("🔄 Upload Demand CSV")
     uploaded_file = st.sidebar.file_uploader("Upload your demand CSV file", type=["csv"])
@@ -73,6 +73,12 @@ def main():
     if uploaded_file is not None:
         try:
             demand_df = pd.read_csv(uploaded_file)
+            # Validate required columns
+            required_columns = {'product_title', 'variant_title', 'variant_sku', 'ending_quantity', 'quantity_sold_per_day'}
+            if not required_columns.issubset(demand_df.columns):
+                missing = required_columns - set(demand_df.columns)
+                st.sidebar.error(f"❌ Missing columns in CSV: {', '.join(missing)}")
+                st.stop()
             st.sidebar.success("✅ CSV uploaded successfully!")
             st.write("### 📊 Demand Data")
             st.dataframe(demand_df)
@@ -206,6 +212,45 @@ def main():
             'Order Quantity', 'Total Lead Time', 'Safety Stock'
         ]
         st.dataframe(products_df[display_columns])
+
+        st.subheader("🔄 Manage Products")
+
+        # Create columns for better layout
+        cols = st.columns([4, 2, 2, 2, 2])
+
+        # Header Row
+        with cols[0]:
+            st.markdown("**Product**")
+        with cols[1]:
+            st.markdown("**Variant**")
+        with cols[2]:
+            st.markdown("**SKU**")
+        with cols[3]:
+            st.markdown("**Actions**")
+        with cols[4]:
+            st.markdown("")
+
+        # Iterate through products and display with Remove button
+        for idx, product in enumerate(st.session_state.products):
+            with cols[0]:
+                st.markdown(product['Product'])
+            with cols[1]:
+                st.markdown(product['Variant'])
+            with cols[2]:
+                st.markdown(product['SKU'])
+            with cols[3]:
+                remove_key = f"remove_{product['SKU']}"
+                if st.button("🗑️ Remove", key=remove_key):
+                    # Remove product from session state
+                    st.session_state.products.pop(idx)
+                    # Remove corresponding schedule
+                    if product['SKU'] in st.session_state.schedules:
+                        del st.session_state.schedules[product['SKU']]
+                    st.success(f"✅ Product '{product['Product']} - {product['Variant']}' removed successfully!")
+                    # To prevent multiple removals, rerun the script
+                    st.experimental_rerun()
+            with cols[4]:
+                st.markdown("")  # Placeholder for alignment
 
         # Display Order Schedules for all products
         st.header("📅 Order Schedules for Next 12 Months")
