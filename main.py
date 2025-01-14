@@ -59,6 +59,8 @@ if 'products' not in st.session_state:
     st.session_state.products = []
 if 'schedules' not in st.session_state:
     st.session_state.schedules = {}
+if 'selected_product_details' not in st.session_state:
+    st.session_state.selected_product_details = None
 
 # Streamlit App
 def main():
@@ -83,37 +85,66 @@ def main():
 
     st.header("➕ Add Product to Board")
 
-    # Form to add a product
-    with st.form("product_form"):
+    # Form for Product Selection and Refresh
+    with st.form("refresh_form"):
+        st.subheader("🔍 Select and Refresh Product Details")
         # Dropdown to select product by name or SKU
         product_options = demand_df.apply(
             lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1
         )
         selected_product = st.selectbox("Select Product", options=product_options)
 
-        # Extract the selected product's details
-        selected_index = product_options.index[demand_df.apply(
-            lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1
-        ) == selected_product][0]
-        selected_row = demand_df.iloc[selected_index]
-        product_name = selected_row['product_title']
-        variant_name = selected_row['variant_title']
-        variant_sku = selected_row['variant_sku']
-        current_inventory = selected_row['ending_quantity']
-        daily_demand = selected_row['quantity_sold_per_day']
+        refresh = st.form_submit_button("🔄 Refresh Details")
 
-        # Display selected product details
-        st.markdown(f"**Product:** {product_name} - {variant_name} (SKU: {variant_sku})")
-        st.markdown(f"**Current Inventory:** {current_inventory} units")
-        st.markdown(f"**Daily Demand:** {daily_demand} units/day")
+    if refresh:
+        try:
+            # Extract the selected product's details
+            selected_index = product_options.index[demand_df.apply(
+                lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1
+            ) == selected_product][0]
+            selected_row = demand_df.iloc[selected_index]
+            st.session_state.selected_product_details = {
+                'product_name': selected_row['product_title'],
+                'variant_name': selected_row['variant_title'],
+                'variant_sku': selected_row['variant_sku'],
+                'current_inventory': selected_row['ending_quantity'],
+                'daily_demand': selected_row['quantity_sold_per_day']
+            }
+            st.success("✅ Product details refreshed successfully!")
+        except Exception as e:
+            st.error("❌ Failed to refresh product details. Please check your selection.")
 
-        # Input fields for lead times and safety stock
-        lead_time = st.number_input("Manufacturing Lead Time (days)", min_value=0, value=45)
-        shipping_time = st.number_input("Shipping Time (days)", min_value=0, value=45)
-        safety_stock_days = st.number_input("Safety Stock Time (days)", min_value=0, value=10)
-        submit = st.form_submit_button("📥 Add Product")
+    # Display Selected Product Details
+    if st.session_state.selected_product_details:
+        details = st.session_state.selected_product_details
+        st.markdown(f"**Product:** {details['product_name']} - {details['variant_name']} (SKU: {details['variant_sku']})")
+        st.markdown(f"**Current Inventory:** {details['current_inventory']} units")
+        st.markdown(f"**Daily Demand:** {details['daily_demand']} units/day")
+    else:
+        st.info("ℹ️ Please select a product and click 'Refresh Details' to view its information.")
 
-    if submit:
+    # Form to Add Product
+    with st.form("product_form"):
+        st.subheader("📝 Enter Order Details")
+
+        if st.session_state.selected_product_details:
+            # Input fields for lead times and safety stock
+            lead_time = st.number_input("Manufacturing Lead Time (days)", min_value=0, value=45)
+            shipping_time = st.number_input("Shipping Time (days)", min_value=0, value=45)
+            safety_stock_days = st.number_input("Safety Stock Time (days)", min_value=0, value=10)
+            submit = st.form_submit_button("📥 Add Product")
+        else:
+            st.warning("⚠️ Please refresh product details before adding.")
+            submit = st.form_submit_button("📥 Add Product", disabled=True)
+
+    if submit and st.session_state.selected_product_details:
+        details = st.session_state.selected_product_details
+        product_name = details['product_name']
+        variant_name = details['variant_name']
+        variant_sku = details['variant_sku']
+        current_inventory = details['current_inventory']
+        daily_demand = details['daily_demand']
+
         # Check if product is already added
         if variant_sku in [prod['SKU'] for prod in st.session_state.products]:
             st.error(f"❌ Product with SKU '{variant_sku}' is already added.")
@@ -160,6 +191,9 @@ def main():
             # Inform the user
             st.info(f"📅 Order schedule for '{product_name} - {variant_name}' has been generated.")
 
+            # Optionally, reset the selected product details after adding
+            st.session_state.selected_product_details = None
+
     # Display all added products
     if st.session_state.products:
         st.header("🗂️ All Added Products")
@@ -195,7 +229,7 @@ def main():
                 st.info(f"ℹ️ No orders needed within the next 12 months for {product['Product']} - {product['Variant']} (SKU: {sku}).")
 
     else:
-        st.info("📋 No products added yet. Use the form above to add products.")
+        st.info("📋 No products added yet. Use the forms above to add products.")
 
 if __name__ == "__main__":
     main()
