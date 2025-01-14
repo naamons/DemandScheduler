@@ -10,7 +10,17 @@ def calculate_order_quantity(daily_demand, lead_time_days, shipping_time_days, s
     return order_quantity, total_lead_time, safety_stock
 
 # Function to generate order schedule
-def generate_order_schedule(start_date, current_inventory, daily_demand, lead_time_days, shipping_time_days, safety_stock_days):
+def generate_order_schedule(
+    start_date, 
+    current_inventory, 
+    daily_demand, 
+    lead_time_days, 
+    shipping_time_days, 
+    safety_stock_days, 
+    product_name, 
+    variant_name, 
+    variant_sku
+):
     total_lead_time = lead_time_days + shipping_time_days
     safety_stock = daily_demand * safety_stock_days
     reorder_point = (daily_demand * total_lead_time) + safety_stock
@@ -76,11 +86,15 @@ def main():
     # Form to add a product
     with st.form("product_form"):
         # Dropdown to select product by name or SKU
-        product_options = demand_df.apply(lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1)
+        product_options = demand_df.apply(
+            lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1
+        )
         selected_product = st.selectbox("Select Product", options=product_options)
 
         # Extract the selected product's details
-        selected_index = product_options.index[demand_df.apply(lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1) == selected_product][0]
+        selected_index = product_options.index[demand_df.apply(
+            lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1
+        ) == selected_product][0]
         selected_row = demand_df.iloc[selected_index]
         product_name = selected_row['product_title']
         variant_name = selected_row['variant_title']
@@ -134,7 +148,10 @@ def main():
                 daily_demand=daily_demand,
                 lead_time_days=lead_time,
                 shipping_time_days=shipping_time,
-                safety_stock_days=safety_stock_days
+                safety_stock_days=safety_stock_days,
+                product_name=product_name,
+                variant_name=variant_name,
+                variant_sku=variant_sku
             )
 
             # Store the schedule in session state
@@ -149,8 +166,11 @@ def main():
 
         # Create a DataFrame of products
         products_df = pd.DataFrame(st.session_state.products)
-        display_columns = ['Product', 'Variant', 'SKU', 'Current Inventory', 'Daily Demand', 'Manufacturing Lead Time',
-                           'Shipping Time', 'Safety Stock Days', 'Order Quantity', 'Total Lead Time', 'Safety Stock']
+        display_columns = [
+            'Product', 'Variant', 'SKU', 'Current Inventory', 'Daily Demand', 
+            'Manufacturing Lead Time', 'Shipping Time', 'Safety Stock Days', 
+            'Order Quantity', 'Total Lead Time', 'Safety Stock'
+        ]
         st.dataframe(products_df[display_columns])
 
         # Display Order Schedules for all products
