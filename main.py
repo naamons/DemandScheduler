@@ -30,6 +30,9 @@ def generate_order_schedule(start_date, current_inventory, daily_demand, lead_ti
             order_date = date
             arrival_date = order_date + timedelta(days=total_lead_time)
             schedule.append({
+                'Product': product_name,
+                'Variant': variant_name,
+                'SKU': variant_sku,
                 'Order Date': order_date.strftime('%Y-%m-%d'),
                 'Arrival Date': arrival_date.strftime('%Y-%m-%d'),
                 'Order Quantity': order_quantity
@@ -40,6 +43,12 @@ def generate_order_schedule(start_date, current_inventory, daily_demand, lead_ti
         date += timedelta(days=1)
 
     return pd.DataFrame(schedule)
+
+# Initialize session state for products and schedules
+if 'products' not in st.session_state:
+    st.session_state.products = []
+if 'schedules' not in st.session_state:
+    st.session_state.schedules = {}
 
 # Streamlit App
 def main():
@@ -71,7 +80,8 @@ def main():
         selected_product = st.selectbox("Select Product", options=product_options)
 
         # Extract the selected product's details
-        selected_row = demand_df.iloc[product_options.index[demand_df.apply(lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1) == selected_product][0]]
+        selected_index = product_options.index[demand_df.apply(lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1) == selected_product][0]
+        selected_row = demand_df.iloc[selected_index]
         product_name = selected_row['product_title']
         variant_name = selected_row['variant_title']
         variant_sku = selected_row['variant_sku']
@@ -90,47 +100,82 @@ def main():
         submit = st.form_submit_button("📥 Add Product")
 
     if submit:
-        # Calculate order quantity and safety stock
-        order_quantity, total_lead_time, safety_stock = calculate_order_quantity(
-            daily_demand, lead_time, shipping_time, safety_stock_days
-        )
-
-        st.success(f"✅ Product '{product_name} - {variant_name}' added successfully!")
-
-        st.markdown("**📈 Calculation Details:**")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"**Total Lead Time:** {total_lead_time} days")
-            st.write(f"**Safety Stock:** {safety_stock} units")
-        with col2:
-            st.write(f"**Reorder Point:** {(daily_demand * total_lead_time) + safety_stock} units")
-            st.write(f"**Order Quantity:** {order_quantity} units")
-
-        # Generate Order Schedule
-        today = datetime.today()
-        schedule_df = generate_order_schedule(
-            start_date=today,
-            current_inventory=current_inventory,
-            daily_demand=daily_demand,
-            lead_time_days=lead_time,
-            shipping_time_days=shipping_time,
-            safety_stock_days=safety_stock_days
-        )
-
-        if not schedule_df.empty:
-            st.write("### 📅 Order Schedule for Next 12 Months")
-            st.dataframe(schedule_df)
-
-            # Downloadable Report
-            csv = schedule_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Download Order Schedule as CSV",
-                data=csv,
-                file_name=f"{variant_sku}_order_schedule.csv",
-                mime="text/csv",
-            )
+        # Check if product is already added
+        if variant_sku in [prod['SKU'] for prod in st.session_state.products]:
+            st.error(f"❌ Product with SKU '{variant_sku}' is already added.")
         else:
-            st.info("No orders needed within the next 12 months based on current inventory and demand.")
+            # Calculate order quantity and safety stock
+            order_quantity, total_lead_time, safety_stock = calculate_order_quantity(
+                daily_demand, lead_time, shipping_time, safety_stock_days
+            )
+
+            # Append product to session state
+            st.session_state.products.append({
+                'Product': product_name,
+                'Variant': variant_name,
+                'SKU': variant_sku,
+                'Current Inventory': current_inventory,
+                'Daily Demand': daily_demand,
+                'Manufacturing Lead Time': lead_time,
+                'Shipping Time': shipping_time,
+                'Safety Stock Days': safety_stock_days,
+                'Order Quantity': order_quantity,
+                'Total Lead Time': total_lead_time,
+                'Safety Stock': safety_stock
+            })
+
+            st.success(f"✅ Product '{product_name} - {variant_name}' added successfully!")
+
+            # Generate Order Schedule for the product
+            today = datetime.today()
+            schedule_df = generate_order_schedule(
+                start_date=today,
+                current_inventory=current_inventory,
+                daily_demand=daily_demand,
+                lead_time_days=lead_time,
+                shipping_time_days=shipping_time,
+                safety_stock_days=safety_stock_days
+            )
+
+            # Store the schedule in session state
+            st.session_state.schedules[variant_sku] = schedule_df
+
+            # Inform the user
+            st.info(f"📅 Order schedule for '{product_name} - {variant_name}' has been generated.")
+
+    # Display all added products
+    if st.session_state.products:
+        st.header("🗂️ All Added Products")
+
+        # Create a DataFrame of products
+        products_df = pd.DataFrame(st.session_state.products)
+        display_columns = ['Product', 'Variant', 'SKU', 'Current Inventory', 'Daily Demand', 'Manufacturing Lead Time',
+                           'Shipping Time', 'Safety Stock Days', 'Order Quantity', 'Total Lead Time', 'Safety Stock']
+        st.dataframe(products_df[display_columns])
+
+        # Display Order Schedules for all products
+        st.header("📅 Order Schedules for Next 12 Months")
+
+        for product in st.session_state.products:
+            sku = product['SKU']
+            schedule = st.session_state.schedules.get(sku)
+
+            if schedule is not None and not schedule.empty:
+                st.subheader(f"Order Schedule for {product['Product']} - {product['Variant']} (SKU: {sku})")
+                st.dataframe(schedule)
+                # Download button for each schedule
+                csv = schedule.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"⬇️ Download Order Schedule for {sku} as CSV",
+                    data=csv,
+                    file_name=f"{sku}_order_schedule.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info(f"ℹ️ No orders needed within the next 12 months for {product['Product']} - {product['Variant']} (SKU: {sku}).")
+
+    else:
+        st.info("📋 No products added yet. Use the form above to add products.")
 
 if __name__ == "__main__":
     main()
