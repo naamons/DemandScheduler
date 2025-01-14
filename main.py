@@ -65,7 +65,7 @@ if 'selected_product_details' not in st.session_state:
 # Streamlit App
 def main():
     st.set_page_config(page_title="Inventory Order Management", layout="wide")
-    st.title("📦 Inventory Order Management App")
+    st.title("📦 Inventory Order Management")
 
     st.sidebar.header("🔄 Upload Demand CSV")
     uploaded_file = st.sidebar.file_uploader("Upload your demand CSV file", type=["csv"])
