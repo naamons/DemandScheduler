@@ -25,7 +25,7 @@ def generate_order_schedule(
 ):
     total_lead_time = lead_time_days + shipping_time_days
     safety_stock = daily_demand * safety_stock_days
-    reorder_point = (daily_demand * total_lead_time) + safety_stock
+    reorder_point = safety_stock + (daily_demand * total_lead_time)
     order_quantity = (daily_demand * total_lead_time) + safety_stock
 
     schedule = []
@@ -62,8 +62,8 @@ def generate_order_schedule(
         # Consume daily demand
         current_inventory -= daily_demand
 
-        # Check if inventory has fallen below safety stock
-        if current_inventory <= safety_stock:
+        # Check if inventory has fallen below reorder point
+        if current_inventory <= reorder_point:
             # Check if there's already a pending order
             pending_orders = [arrival for arrival in future_arrivals if arrival['arrival_date'] > date]
             if not pending_orders:
@@ -85,30 +85,29 @@ def generate_order_schedule(
                     'quantity': order_quantity
                 })
 
-                # Log the arrival event separately when it happens in the loop
         date += timedelta(days=1)
 
-    # Convert schedule to DataFrame and sort by date
+    # Convert schedule to DataFrame and sort by arrival date
     schedule_df = pd.DataFrame(schedule)
-    # Replace empty strings with NaN for proper sorting
-    schedule_df['Arrival Date'].replace('', pd.NaT, inplace=True)
     schedule_df['Arrival Date'] = pd.to_datetime(schedule_df['Arrival Date'], errors='coerce')
     schedule_df.sort_values(by=['Arrival Date'], inplace=True)
     schedule_df.reset_index(drop=True, inplace=True)
+
     return schedule_df
 
 # Initialize session state for products and schedules
-if 'products' not in st.session_state:
-    st.session_state.products = []
-if 'schedules' not in st.session_state:
-    st.session_state.schedules = {}
-if 'selected_product_details' not in st.session_state:
-    st.session_state.selected_product_details = None
-if 'update' not in st.session_state:
-    st.session_state['update'] = False
+def initialize_session_state():
+    if 'products' not in st.session_state:
+        st.session_state.products = []
+    if 'schedules' not in st.session_state:
+        st.session_state.schedules = {}
+    if 'selected_product_details' not in st.session_state:
+        st.session_state.selected_product_details = None
 
 # Streamlit App
 def main():
+    initialize_session_state()
+
     st.set_page_config(page_title="Inventory Order Management", layout="wide")
     st.title("📦 Inventory Order Management App")
 
@@ -184,12 +183,13 @@ def main():
             shipping_time = st.number_input("Shipping Time (days)", min_value=0, value=45)
             safety_stock_days = st.number_input("Safety Stock Time (days)", min_value=0, value=10)
             
-            # **Input Fields for In-Transit Information**
+            # Input Fields for In-Transit Information
             in_transit_quantity = st.number_input("Currently In Transit Quantity", min_value=0, value=0)
             if in_transit_quantity > 0:
+                default_arrival = datetime.today() + timedelta(days=lead_time + shipping_time)
                 expected_arrival = st.date_input(
                     "Expected Arrival Date",
-                    value=datetime.today() + timedelta(days=lead_time + shipping_time)
+                    value=default_arrival
                 )
             else:
                 expected_arrival = None
@@ -257,7 +257,7 @@ def main():
             # Inform the user
             st.info(f"📅 Order schedule for '{product_name} - {variant_name}' has been generated.")
 
-            # Optionally, reset the selected product details after adding
+            # Reset the selected product details after adding
             st.session_state.selected_product_details = None
 
     # Display all added products
@@ -291,7 +291,7 @@ def main():
             st.markdown("")  # Placeholder for alignment
 
         # Iterate through products and display with Remove button
-        for idx, product in enumerate(st.session_state.products):
+        for product in st.session_state.products.copy():
             with cols[0]:
                 st.markdown(product['Product'])
             with cols[1]:
@@ -301,14 +301,13 @@ def main():
             with cols[3]:
                 remove_key = f"remove_{product['SKU']}"
                 if st.button("🗑️ Remove", key=remove_key):
-                    # Remove product from session state
-                    st.session_state.products.pop(idx)
+                    # Remove product from session state based on SKU
+                    st.session_state.products = [prod for prod in st.session_state.products if prod['SKU'] != product['SKU']]
                     # Remove corresponding schedule
                     if product['SKU'] in st.session_state.schedules:
                         del st.session_state.schedules[product['SKU']]
                     st.success(f"✅ Product '{product['Product']} - {product['Variant']}' removed successfully!")
-                    # Toggle the 'update' state to trigger a UI refresh
-                    st.session_state['update'] = not st.session_state.get('update', False)
+                    # No need to rerun; Streamlit will update the UI automatically
             with cols[4]:
                 st.markdown("")  # Placeholder for alignment
 
@@ -332,6 +331,6 @@ def main():
                 )
             else:
                 st.info(f"ℹ️ No orders needed within the next 12 months for {product['Product']} - {product['Variant']} (SKU: {sku}).")
-
+    # Run the app
     if __name__ == "__main__":
         main()
