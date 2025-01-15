@@ -32,87 +32,41 @@ def generate_order_schedule(
     date = start_date
     end_date = start_date + timedelta(days=365)  # 12 months
 
-    # Initialize a list to keep track of future inventory arrivals
-    future_arrivals = []
-
-    # If there is an in-transit quantity, schedule its arrival
-    if in_transit_quantity > 0 and expected_arrival:
-        future_arrivals.append({
-            'arrival_date': expected_arrival,
-            'quantity': in_transit_quantity
-        })
+    # Adjust current inventory by subtracting in-transit quantity if arrival is in the future
+    if in_transit_quantity > 0 and expected_arrival and expected_arrival > start_date:
+        available_inventory = current_inventory
+        pending_inventory = in_transit_quantity
+    else:
+        available_inventory = current_inventory + in_transit_quantity
+        pending_inventory = 0
 
     while date < end_date:
-        # Check for any scheduled arrivals on the current date
-        arrivals_today = [arrival for arrival in future_arrivals if arrival['arrival_date'] == date]
-        for arrival in arrivals_today:
-            current_inventory += arrival['quantity']
-            schedule.append({
-                'Product': product_name,
-                'Variant': variant_name,
-                'SKU': variant_sku,
-                'Date': date.strftime('%Y-%m-%d'),
-                'Event': 'In Transit Arrival',
-                'Quantity': arrival['quantity'],
-                'Current Inventory': current_inventory
-            })
-            # Remove the arrival from future arrivals
-            future_arrivals.remove(arrival)
+        # Calculate days until reorder point is reached
+        days_until_reorder = (available_inventory - safety_stock) / daily_demand if daily_demand else float('inf')
+        reorder_date = date + timedelta(days=days_until_reorder)
 
-        # Consume daily demand
-        current_inventory -= daily_demand
+        if reorder_date <= date:
+            reorder_date = date
 
-        # Log daily inventory
+        # Schedule PO placement
+        po_date = reorder_date
+        arrival_date = po_date + timedelta(days=total_lead_time)
+
+        # Append to schedule
         schedule.append({
             'Product': product_name,
             'Variant': variant_name,
             'SKU': variant_sku,
-            'Date': date.strftime('%Y-%m-%d'),
-            'Event': 'Daily Demand',
-            'Quantity': -daily_demand,
-            'Current Inventory': current_inventory
+            'Order Date': po_date.strftime('%Y-%m-%d'),
+            'Arrival Date': arrival_date.strftime('%Y-%m-%d'),
+            'Order Quantity': order_quantity
         })
 
-        # Check if inventory has reached reorder point
-        if current_inventory <= reorder_point:
-            # Schedule next order
-            order_date = date
-            arrival_date = order_date + timedelta(days=total_lead_time)
-            schedule.append({
-                'Product': product_name,
-                'Variant': variant_name,
-                'SKU': variant_sku,
-                'Date': order_date.strftime('%Y-%m-%d'),
-                'Event': 'Order Placed',
-                'Quantity': order_quantity,
-                'Current Inventory': current_inventory
-            })
-            # Schedule the arrival of the order
-            future_arrivals.append({
-                'arrival_date': arrival_date,
-                'quantity': order_quantity
-            })
-            # Update inventory upon order arrival
-            # (This will be handled in future iterations)
+        # Update available inventory
+        available_inventory += order_quantity
+        date = arrival_date  # Move to the arrival date for the next calculation
 
-            # Reset reorder point to avoid multiple orders on the same day
-            current_inventory += order_quantity
-            schedule.append({
-                'Product': product_name,
-                'Variant': variant_name,
-                'SKU': variant_sku,
-                'Date': arrival_date.strftime('%Y-%m-%d'),
-                'Event': 'Order Arrival',
-                'Quantity': order_quantity,
-                'Current Inventory': current_inventory
-            })
-
-        date += timedelta(days=1)
-
-    # Convert schedule to DataFrame and sort by date
-    schedule_df = pd.DataFrame(schedule)
-    schedule_df = schedule_df.sort_values(by='Date')
-    return schedule_df
+    return pd.DataFrame(schedule)
 
 # Initialize session state for products and schedules
 if 'products' not in st.session_state:
@@ -201,7 +155,13 @@ def main():
             
             # **New Input Fields for In-Transit Information**
             in_transit_quantity = st.number_input("Currently In Transit Quantity", min_value=0, value=0)
-            expected_arrival = st.date_input("Expected Arrival Date", value=datetime.today() + timedelta(days=lead_time + shipping_time))
+            if in_transit_quantity > 0:
+                expected_arrival = st.date_input(
+                    "Expected Arrival Date",
+                    value=datetime.today() + timedelta(days=lead_time + shipping_time)
+                )
+            else:
+                expected_arrival = None
             submit = st.form_submit_button("📥 Add Product")
         else:
             st.warning("⚠️ Please refresh product details before adding.")
