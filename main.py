@@ -89,9 +89,10 @@ def generate_order_schedule(
 
     # Convert schedule to DataFrame and sort by arrival date
     schedule_df = pd.DataFrame(schedule)
-    schedule_df['Arrival Date'] = pd.to_datetime(schedule_df['Arrival Date'], errors='coerce')
-    schedule_df.sort_values(by=['Arrival Date'], inplace=True)
-    schedule_df.reset_index(drop=True, inplace=True)
+    if not schedule_df.empty:
+        schedule_df['Arrival Date'] = pd.to_datetime(schedule_df['Arrival Date'], errors='coerce')
+        schedule_df.sort_values(by=['Arrival Date'], inplace=True)
+        schedule_df.reset_index(drop=True, inplace=True)
 
     return schedule_df
 
@@ -149,9 +150,7 @@ def main():
     if refresh:
         try:
             # Extract the selected product's details
-            selected_index = product_options.index[demand_df.apply(
-                lambda row: f"{row['product_title']} - {row['variant_title']} (SKU: {row['variant_sku']})", axis=1
-            ) == selected_product][0]
+            selected_index = product_options[product_options == selected_product].index[0]
             selected_row = demand_df.iloc[selected_index]
             st.session_state.selected_product_details = {
                 'product_name': selected_row['product_title'],
@@ -189,7 +188,7 @@ def main():
                 default_arrival = datetime.today() + timedelta(days=lead_time + shipping_time)
                 expected_arrival = st.date_input(
                     "Expected Arrival Date",
-                    value=default_arrival
+                    value=default_arrival.date()
                 )
             else:
                 expected_arrival = None
@@ -331,6 +330,7 @@ def main():
                 )
             else:
                 st.info(f"ℹ️ No orders needed within the next 12 months for {product['Product']} - {product['Variant']} (SKU: {sku}).")
-    # Run the app
-    if __name__ == "__main__":
-        main()
+
+# Run the app
+if __name__ == "__main__":
+    main()
