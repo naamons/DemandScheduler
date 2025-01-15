@@ -19,7 +19,9 @@ def generate_order_schedule(
     safety_stock_days, 
     product_name, 
     variant_name, 
-    variant_sku
+    variant_sku,
+    in_transit_quantity=0,
+    expected_arrival=None
 ):
     total_lead_time = lead_time_days + shipping_time_days
     safety_stock = daily_demand * safety_stock_days
@@ -30,9 +32,46 @@ def generate_order_schedule(
     date = start_date
     end_date = start_date + timedelta(days=365)  # 12 months
 
+    # Initialize a list to keep track of future inventory arrivals
+    future_arrivals = []
+
+    # If there is an in-transit quantity, schedule its arrival
+    if in_transit_quantity > 0 and expected_arrival:
+        future_arrivals.append({
+            'arrival_date': expected_arrival,
+            'quantity': in_transit_quantity
+        })
+
     while date < end_date:
+        # Check for any scheduled arrivals on the current date
+        arrivals_today = [arrival for arrival in future_arrivals if arrival['arrival_date'] == date]
+        for arrival in arrivals_today:
+            current_inventory += arrival['quantity']
+            schedule.append({
+                'Product': product_name,
+                'Variant': variant_name,
+                'SKU': variant_sku,
+                'Date': date.strftime('%Y-%m-%d'),
+                'Event': 'In Transit Arrival',
+                'Quantity': arrival['quantity'],
+                'Current Inventory': current_inventory
+            })
+            # Remove the arrival from future arrivals
+            future_arrivals.remove(arrival)
+
         # Consume daily demand
         current_inventory -= daily_demand
+
+        # Log daily inventory
+        schedule.append({
+            'Product': product_name,
+            'Variant': variant_name,
+            'SKU': variant_sku,
+            'Date': date.strftime('%Y-%m-%d'),
+            'Event': 'Daily Demand',
+            'Quantity': -daily_demand,
+            'Current Inventory': current_inventory
+        })
 
         # Check if inventory has reached reorder point
         if current_inventory <= reorder_point:
@@ -43,16 +82,37 @@ def generate_order_schedule(
                 'Product': product_name,
                 'Variant': variant_name,
                 'SKU': variant_sku,
-                'Order Date': order_date.strftime('%Y-%m-%d'),
-                'Arrival Date': arrival_date.strftime('%Y-%m-%d'),
-                'Order Quantity': order_quantity
+                'Date': order_date.strftime('%Y-%m-%d'),
+                'Event': 'Order Placed',
+                'Quantity': order_quantity,
+                'Current Inventory': current_inventory
+            })
+            # Schedule the arrival of the order
+            future_arrivals.append({
+                'arrival_date': arrival_date,
+                'quantity': order_quantity
             })
             # Update inventory upon order arrival
+            # (This will be handled in future iterations)
+
+            # Reset reorder point to avoid multiple orders on the same day
             current_inventory += order_quantity
+            schedule.append({
+                'Product': product_name,
+                'Variant': variant_name,
+                'SKU': variant_sku,
+                'Date': arrival_date.strftime('%Y-%m-%d'),
+                'Event': 'Order Arrival',
+                'Quantity': order_quantity,
+                'Current Inventory': current_inventory
+            })
 
         date += timedelta(days=1)
 
-    return pd.DataFrame(schedule)
+    # Convert schedule to DataFrame and sort by date
+    schedule_df = pd.DataFrame(schedule)
+    schedule_df = schedule_df.sort_values(by='Date')
+    return schedule_df
 
 # Initialize session state for products and schedules
 if 'products' not in st.session_state:
@@ -138,6 +198,10 @@ def main():
             lead_time = st.number_input("Manufacturing Lead Time (days)", min_value=0, value=45)
             shipping_time = st.number_input("Shipping Time (days)", min_value=0, value=45)
             safety_stock_days = st.number_input("Safety Stock Time (days)", min_value=0, value=10)
+            
+            # **New Input Fields for In-Transit Information**
+            in_transit_quantity = st.number_input("Currently In Transit Quantity", min_value=0, value=0)
+            expected_arrival = st.date_input("Expected Arrival Date", value=datetime.today() + timedelta(days=lead_time + shipping_time))
             submit = st.form_submit_button("📥 Add Product")
         else:
             st.warning("⚠️ Please refresh product details before adding.")
@@ -172,13 +236,16 @@ def main():
                 'Safety Stock Days': safety_stock_days,
                 'Order Quantity': order_quantity,
                 'Total Lead Time': total_lead_time,
-                'Safety Stock': safety_stock
+                'Safety Stock': safety_stock,
+                'In Transit Quantity': in_transit_quantity,
+                'Expected Arrival': expected_arrival.strftime('%Y-%m-%d') if in_transit_quantity > 0 else ''
             })
 
             st.success(f"✅ Product '{product_name} - {variant_name}' added successfully!")
 
             # Generate Order Schedule for the product
             today = datetime.today()
+            expected_arrival_date = datetime.combine(expected_arrival, datetime.min.time()) if in_transit_quantity > 0 else None
             schedule_df = generate_order_schedule(
                 start_date=today,
                 current_inventory=current_inventory,
@@ -188,7 +255,9 @@ def main():
                 safety_stock_days=safety_stock_days,
                 product_name=product_name,
                 variant_name=variant_name,
-                variant_sku=variant_sku
+                variant_sku=variant_sku,
+                in_transit_quantity=in_transit_quantity,
+                expected_arrival=expected_arrival_date
             )
 
             # Store the schedule in session state
@@ -209,7 +278,7 @@ def main():
         display_columns = [
             'Product', 'Variant', 'SKU', 'Current Inventory', 'Daily Demand', 
             'Manufacturing Lead Time', 'Shipping Time', 'Safety Stock Days', 
-            'Order Quantity', 'Total Lead Time', 'Safety Stock'
+            'Order Quantity', 'Total Lead Time', 'Safety Stock', 'In Transit Quantity', 'Expected Arrival'
         ]
         st.dataframe(products_df[display_columns])
 
@@ -228,7 +297,7 @@ def main():
         with cols[3]:
             st.markdown("**Actions**")
         with cols[4]:
-            st.markdown("")
+            st.markdown("")  # Placeholder for alignment
 
         # Iterate through products and display with Remove button
         for idx, product in enumerate(st.session_state.products):
