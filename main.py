@@ -32,41 +32,70 @@ def generate_order_schedule(
     date = start_date
     end_date = start_date + timedelta(days=365)  # 12 months
 
-    # Adjust current inventory by subtracting in-transit quantity if arrival is in the future
-    if in_transit_quantity > 0 and expected_arrival and expected_arrival > start_date:
-        available_inventory = current_inventory
-        pending_inventory = in_transit_quantity
-    else:
-        available_inventory = current_inventory + in_transit_quantity
-        pending_inventory = 0
+    # Initialize a list to keep track of future inventory arrivals
+    future_arrivals = []
 
-    while date < end_date:
-        # Calculate days until reorder point is reached
-        days_until_reorder = (available_inventory - safety_stock) / daily_demand if daily_demand else float('inf')
-        reorder_date = date + timedelta(days=days_until_reorder)
-
-        if reorder_date <= date:
-            reorder_date = date
-
-        # Schedule PO placement
-        po_date = reorder_date
-        arrival_date = po_date + timedelta(days=total_lead_time)
-
-        # Append to schedule
-        schedule.append({
-            'Product': product_name,
-            'Variant': variant_name,
-            'SKU': variant_sku,
-            'Order Date': po_date.strftime('%Y-%m-%d'),
-            'Arrival Date': arrival_date.strftime('%Y-%m-%d'),
-            'Order Quantity': order_quantity
+    # If there is an in-transit quantity, schedule its arrival
+    if in_transit_quantity > 0 and expected_arrival:
+        future_arrivals.append({
+            'arrival_date': expected_arrival,
+            'quantity': in_transit_quantity
         })
 
-        # Update available inventory
-        available_inventory += order_quantity
-        date = arrival_date  # Move to the arrival date for the next calculation
+    while date < end_date:
+        # Check for any scheduled arrivals on the current date
+        arrivals_today = [arrival for arrival in future_arrivals if arrival['arrival_date'] == date]
+        for arrival in arrivals_today:
+            current_inventory += arrival['quantity']
+            schedule.append({
+                'Product': product_name,
+                'Variant': variant_name,
+                'SKU': variant_sku,
+                'Order Date': '',
+                'Arrival Date': date.strftime('%Y-%m-%d'),
+                'Order Quantity': arrival['quantity'],
+                'Event': 'In Transit Arrival'
+            })
+            # Remove the arrival from future arrivals
+            future_arrivals.remove(arrival)
 
-    return pd.DataFrame(schedule)
+        # Consume daily demand
+        current_inventory -= daily_demand
+
+        # Check if inventory has fallen below safety stock
+        if current_inventory <= safety_stock:
+            # Check if there's already a pending order
+            pending_orders = [arrival for arrival in future_arrivals if arrival['arrival_date'] > date]
+            if not pending_orders:
+                # Schedule next order
+                order_date = date
+                arrival_date = order_date + timedelta(days=total_lead_time)
+                schedule.append({
+                    'Product': product_name,
+                    'Variant': variant_name,
+                    'SKU': variant_sku,
+                    'Order Date': order_date.strftime('%Y-%m-%d'),
+                    'Arrival Date': arrival_date.strftime('%Y-%m-%d'),
+                    'Order Quantity': order_quantity,
+                    'Event': 'PO Placed'
+                })
+                # Schedule the arrival of the order
+                future_arrivals.append({
+                    'arrival_date': arrival_date,
+                    'quantity': order_quantity
+                })
+
+                # Log the arrival event separately when it happens in the loop
+        date += timedelta(days=1)
+
+    # Convert schedule to DataFrame and sort by date
+    schedule_df = pd.DataFrame(schedule)
+    # Replace empty strings with NaN for proper sorting
+    schedule_df['Arrival Date'].replace('', pd.NaT, inplace=True)
+    schedule_df['Arrival Date'] = pd.to_datetime(schedule_df['Arrival Date'], errors='coerce')
+    schedule_df.sort_values(by=['Arrival Date'], inplace=True)
+    schedule_df.reset_index(drop=True, inplace=True)
+    return schedule_df
 
 # Initialize session state for products and schedules
 if 'products' not in st.session_state:
@@ -75,6 +104,8 @@ if 'schedules' not in st.session_state:
     st.session_state.schedules = {}
 if 'selected_product_details' not in st.session_state:
     st.session_state.selected_product_details = None
+if 'update' not in st.session_state:
+    st.session_state['update'] = False
 
 # Streamlit App
 def main():
@@ -153,7 +184,7 @@ def main():
             shipping_time = st.number_input("Shipping Time (days)", min_value=0, value=45)
             safety_stock_days = st.number_input("Safety Stock Time (days)", min_value=0, value=10)
             
-            # **New Input Fields for In-Transit Information**
+            # **Input Fields for In-Transit Information**
             in_transit_quantity = st.number_input("Currently In Transit Quantity", min_value=0, value=0)
             if in_transit_quantity > 0:
                 expected_arrival = st.date_input(
@@ -276,8 +307,8 @@ def main():
                     if product['SKU'] in st.session_state.schedules:
                         del st.session_state.schedules[product['SKU']]
                     st.success(f"✅ Product '{product['Product']} - {product['Variant']}' removed successfully!")
-                    # To prevent multiple removals, rerun the script
-                    st.experimental_rerun()
+                    # Toggle the 'update' state to trigger a UI refresh
+                    st.session_state['update'] = not st.session_state.get('update', False)
             with cols[4]:
                 st.markdown("")  # Placeholder for alignment
 
@@ -302,8 +333,5 @@ def main():
             else:
                 st.info(f"ℹ️ No orders needed within the next 12 months for {product['Product']} - {product['Variant']} (SKU: {sku}).")
 
-    else:
-        st.info("📋 No products added yet. Use the forms above to add products.")
-
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
