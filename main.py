@@ -54,8 +54,7 @@ def generate_order_schedule(
                 'Order Date': '',
                 'Arrival Date': date.strftime('%Y-%m-%d'),
                 'Order Quantity': arrival['quantity'],
-                'Event': 'In Transit Arrival',
-                'Completed': False  # Initialize as not completed
+                'Event': 'In Transit Arrival'
             })
             # Remove the arrival from future arrivals
             future_arrivals.remove(arrival)
@@ -78,8 +77,7 @@ def generate_order_schedule(
                     'Order Date': order_date.strftime('%Y-%m-%d'),
                     'Arrival Date': arrival_date.strftime('%Y-%m-%d'),
                     'Order Quantity': order_quantity,
-                    'Event': 'PO Placed',
-                    'Completed': False  # Initialize as not completed
+                    'Event': 'PO Placed'
                 })
                 # Schedule the arrival of the order
                 future_arrivals.append({
@@ -321,35 +319,8 @@ def main():
 
             if schedule is not None and not schedule.empty:
                 st.subheader(f"Order Schedule for {product['Product']} - {product['Variant']} (SKU: {sku})")
-                
-                # Iterate through each task in the schedule
-                for idx, task in schedule.iterrows():
-                    with st.expander(f"{task['Event']} on {task['Arrival Date'].strftime('%Y-%m-%d')}"):
-                        cols_task = st.columns([1, 3, 2, 2, 1])  # Layout for task details and checkbox
-                        with cols_task[0]:
-                            # Display a checkbox to mark the task as completed
-                            completed = st.checkbox(
-                                "✅ Completed",
-                                value=task['Completed'],
-                                key=f"completed_{sku}_{idx}"
-                            )
-                        
-                        with cols_task[1]:
-                            task_description = f"**Product:** {task['Product']}  \n" \
-                                               f"**Variant:** {task['Variant']}  \n" \
-                                               f"**SKU:** {task['SKU']}  \n" \
-                                               f"**Quantity:** {task['Order Quantity']}"
-                            if task['Completed']:
-                                task_description = f"<s>{task_description}</s>"
-                            st.markdown(task_description, unsafe_allow_html=True)
-                        
-                        # Update the 'Completed' status in session state if changed
-                        if f"completed_{sku}_{idx}" in st.session_state:
-                            if st.session_state[f"completed_{sku}_{idx}"] != task['Completed']:
-                                st.session_state.schedules[sku].at[idx, 'Completed'] = st.session_state[f"completed_{sku}_{idx}"]
-                                st.success(f"✅ Marked '{task['Event']}' on {task['Arrival Date'].strftime('%Y-%m-%d')} as {'Completed' if st.session_state[f'completed_{sku}_{idx}'] else 'Incomplete'}.")
-
-                # Download button for each schedule with 'Completed' status
+                st.dataframe(schedule)
+                # Download button for each schedule
                 csv = schedule.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label=f"⬇️ Download Order Schedule for {sku} as CSV",
